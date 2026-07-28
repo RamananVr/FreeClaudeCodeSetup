@@ -1,0 +1,9 @@
+# OmniRoute setup — local artifacts (not for distribution)
+omniroute-stage/
+*.log
+
+# Editor / OS cruft
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
