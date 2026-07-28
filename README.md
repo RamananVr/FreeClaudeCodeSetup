@@ -19,6 +19,7 @@ These scripts encode several hard-won Windows workarounds:
 
 | Script | Purpose |
 | --- | --- |
+| `bootstrap.ps1`                 | One command: run setup then register autostart. Start here. |
 | `scripts/setup-omniroute.ps1`   | Install OmniRoute, create the `claude-omni` launcher, start the server, connect Copilot, seed model aliases. |
 | `scripts/start-omniroute.ps1`   | Idempotently start the server if it is not already up (health-checks first). |
 | `scripts/install-autostart.ps1` | Register/remove a per-user logon task that keeps the server running. |
@@ -31,6 +32,13 @@ These scripts encode several hard-won Windows workarounds:
 - A GitHub Copilot subscription (connected via the OmniRoute dashboard on first run).
 
 ## Quick start
+
+```powershell
+# One command: install + create launcher + start server + register autostart, then launch.
+pwsh -File .\bootstrap.ps1
+```
+
+Or run the steps individually:
 
 ```powershell
 # 1. Install OmniRoute + create the claude-omni launcher + start the server.
@@ -46,6 +54,12 @@ claude-omni
 ### Common options
 
 ```powershell
+# Bootstrap with a specific model and no interactive launch.
+pwsh -File .\bootstrap.ps1 -Model github/claude-opus-4.8 -NoLaunch
+
+# Bootstrap setup only, skip the logon task.
+pwsh -File .\bootstrap.ps1 -NoAutostart
+
 # Pick the main model (default: auto/best-coding, router picks per request).
 pwsh -File .\scripts\setup-omniroute.ps1 -Model github/claude-opus-4.8
 
