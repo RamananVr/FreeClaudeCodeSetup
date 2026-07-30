@@ -14,6 +14,10 @@
 .PARAMETER Port
   OmniRoute server port, applied to both setup and autostart (default: 20128).
 
+.PARAMETER X64NodeVersion
+  On ARM64 hosts, the pinned x64 Node version auto-provisioned for OmniRoute
+  (default: 20.18.1). Ignored on x64 hosts.
+
 .PARAMETER NoAutostart
   Run setup only; skip registering the logon task.
 
@@ -33,6 +37,7 @@
 param(
   [string]$Model = "auto/best-coding",
   [int]$Port = 20128,
+  [string]$X64NodeVersion = "20.18.1",
   [switch]$NoAutostart,
   [switch]$NoLaunch,
   [switch]$RefreshFeedAuth
@@ -50,7 +55,7 @@ foreach ($s in @($setup, $autostart)) {
 Write-Host "`n=== OmniRoute bootstrap ===`n" -ForegroundColor White
 
 # --- 1. Setup ---------------------------------------------------------------
-$setupArgs = @{ Model = $Model; Port = $Port }
+$setupArgs = @{ Model = $Model; Port = $Port; X64NodeVersion = $X64NodeVersion }
 if ($NoLaunch)        { $setupArgs.NoLaunch = $true }
 if ($RefreshFeedAuth) { $setupArgs.RefreshFeedAuth = $true }
 # Always suppress the interactive launch until autostart is registered; re-launch after.

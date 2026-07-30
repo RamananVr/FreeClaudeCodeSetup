@@ -49,6 +49,7 @@ param(
   [string]$Model = "auto/best-coding",
   [string]$StageDir = (Join-Path $env:USERPROFILE "omniroute-stage"),
   [int]$Port = 20128,
+  [string]$X64NodeVersion = "20.18.1",
   [switch]$NoLaunch,
   [switch]$RefreshFeedAuth
 )
@@ -66,10 +67,15 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) { Die "Node.js not fo
 if (-not (Get-Command npm  -ErrorAction SilentlyContinue)) { Die "npm not found on PATH." }
 
 $nodeArch = node -p "process.arch"
-if ($nodeArch -eq "arm64") {
-  Warn "Node is arm64. OmniRoute's native deps (wreq-js) ship no arm64 binary; you may"
-  Warn "need to run under an x64 Node via emulation. This script continues, but if the"
-  Warn "server fails to start, install an x64 Node and re-run with that Node on PATH."
+
+# On ARM64, OmniRoute's native deps ship no arm64 binary. Provision a portable x64 Node
+# and run everything Node-related under it. On x64 this is a no-op ($node.NodeExe = "node").
+$ensureX64 = Join-Path $PSScriptRoot "ensure-x64-node.ps1"
+$node = & $ensureX64 -X64NodeVersion $X64NodeVersion
+if ($node.Dir) {
+  # Process-local only: put x64 Node first on PATH for this script's npm/node calls.
+  $env:Path = "$($node.Dir);$env:Path"
+  Ok "Using provisioned x64 Node: $($node.NodeExe)"
 }
 
 $prefix = (npm config get prefix).Trim()
@@ -119,19 +125,22 @@ if (-not (Test-Path (Join-Path $target "bin\omniroute.mjs"))) { Die "Failed to j
 Ok "Junctioned omniroute -> global node_modules"
 
 # --- 3. Bin shims for omniroute CLIs ----------------------------------------
+# On x64, invoke bare `node` (unchanged). On arm64, bake the absolute x64 node.exe path
+# so the shims never depend on which Node is first on PATH at runtime.
+$nodeInvoke = if ($node.Dir) { '"' + $node.NodeExe + '"' } else { 'node' }
 function New-BinShim([string]$name, [string]$relMjs) {
   $cmd = @"
 @ECHO off
 SETLOCAL
 SET "dp0=%~dp0"
-node "%dp0%node_modules\omniroute\$relMjs" %*
+$nodeInvoke "%dp0%node_modules\omniroute\$relMjs" %*
 "@
   Set-Content -Path (Join-Path $prefix "$name.cmd") -Value $cmd -Encoding ascii
 
   $ps1 = @"
 #!/usr/bin/env pwsh
 `$dir = Split-Path -Parent `$MyInvocation.MyCommand.Definition
-node "`$dir/node_modules/omniroute/$relMjs" `$args
+$nodeInvoke "`$dir/node_modules/omniroute/$relMjs" `$args
 exit `$LASTEXITCODE
 "@
   Set-Content -Path (Join-Path $prefix "$name.ps1") -Value $ps1 -Encoding utf8
@@ -247,7 +256,7 @@ tx();
 db.close();
 console.log('OK ' + Object.keys(aliases).length + ' aliases');
 "@ | Set-Content -Path $aliasSeeder -Encoding utf8
-$seedOut = & node $aliasSeeder 2>&1
+$seedOut = & $node.NodeExe $aliasSeeder 2>&1
 if ($LASTEXITCODE -eq 0) { Ok "Model aliases seeded ($seedOut)" }
 else { Warn "Could not seed model aliases: $seedOut" }
 Remove-Item $aliasSeeder -ErrorAction SilentlyContinue

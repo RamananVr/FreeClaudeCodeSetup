@@ -12,8 +12,11 @@ These scripts encode several hard-won Windows workarounds:
 - `omniroute launch` uses `spawn("claude")` with no shell, which fails on Windows (the
   bin is `claude.ps1`/`claude.cmd`). Setup writes a `claude-omni` wrapper that sets the
   right env and invokes the real `claude` binary directly.
-- On `win32-arm64` machines, OmniRoute's native deps (`wreq-js`) ship no arm64 binary;
-  run under an x64 Node via emulation.
+- On `win32-arm64` machines, OmniRoute's native deps (`wreq-js`) ship no arm64 binary.
+  Setup detects ARM64 and automatically downloads a pinned, portable x64 Node (to
+  `~/.omniroute/node-x64`, checksum-verified), runs the OmniRoute install under it, and
+  bakes its absolute path into the generated `omniroute` shims — no manual steps, and
+  your machine's default arm64 Node is left untouched.
 
 ## Contents
 
@@ -21,15 +24,20 @@ These scripts encode several hard-won Windows workarounds:
 | --- | --- |
 | `bootstrap.ps1`                 | One command: run setup then register autostart. Start here. |
 | `scripts/setup-omniroute.ps1`   | Install OmniRoute, create the `claude-omni` launcher, start the server, connect Copilot, seed model aliases. |
+| `scripts/ensure-x64-node.ps1`   | On ARM64, provision a pinned portable x64 Node (checksum-verified). No-op on x64. |
 | `scripts/start-omniroute.ps1`   | Idempotently start the server if it is not already up (health-checks first). |
 | `scripts/install-autostart.ps1` | Register/remove a per-user logon task that keeps the server running. |
 
 ## Requirements
 
 - Windows 10/11, PowerShell 7 (`pwsh`) recommended.
-- Node.js on `PATH` (x64 recommended — see arm64 note above).
+- Node.js on `PATH`. On ARM64, setup auto-provisions an x64 Node for OmniRoute (see the
+  arm64 note above); your host arm64 Node is fine as the default.
 - Claude Code installed (`claude` on `PATH`).
 - A GitHub Copilot subscription (connected via the OmniRoute dashboard on first run).
+
+To pin a different x64 Node version on ARM64:
+`pwsh -File .\bootstrap.ps1 -X64NodeVersion 22.11.0`
 
 ## Quick start
 
