@@ -217,11 +217,34 @@ for (const p of [
 if (!Database) { console.error('better-sqlite3 not found; skipping alias seed'); process.exit(0); }
 const dbPath = path.join(process.env.USERPROFILE, '.omniroute', 'storage.sqlite');
 const db = new Database(dbPath);
+// Keys = the exact bare ids Claude Code emits (incl. the DATED background/small
+// model id it hardcodes, e.g. claude-haiku-4-5-20251001). Values = unambiguous
+// github/* Copilot models. Cover hyphen, dotted, and dated forms so no bare id
+// Claude Code sends can collide across providers.
 const aliases = {
+  // Opus 4.8 (main)
   'claude-opus-4-8': 'github/claude-opus-4.8',
+  'claude-opus-4.8': 'github/claude-opus-4.8',
   'claude-opus-4-8-fast': 'github/claude-opus-4.8-fast',
-  'claude-haiku-4-5': 'github/claude-haiku-4.5',
+  'claude-opus-4.8-fast': 'github/claude-opus-4.8-fast',
+  // Opus 4.7 / 4.5
+  'claude-opus-4-7': 'github/claude-opus-4.7',
+  'claude-opus-4.7': 'github/claude-opus-4.7',
+  'claude-opus-4-5': 'github/claude-opus-4.5',
+  'claude-opus-4.5': 'github/claude-opus-4.5',
+  // Sonnet 5 / 4.6 / 4.5
+  'claude-sonnet-5': 'github/claude-sonnet-5',
+  'claude-sonnet-4-6': 'github/claude-sonnet-4.6',
+  'claude-sonnet-4.6': 'github/claude-sonnet-4.6',
   'claude-sonnet-4-5': 'github/claude-sonnet-4.5',
+  'claude-sonnet-4.5': 'github/claude-sonnet-4.5',
+  // Haiku 4.5 (background / small model) -- includes the DATED id that caused
+  // the "Ambiguous model 'claude-haiku-4-5-20251001'" failures.
+  'claude-haiku-4-5': 'github/claude-haiku-4.5',
+  'claude-haiku-4.5': 'github/claude-haiku-4.5',
+  'claude-haiku-4-5-20251001': 'github/claude-haiku-4.5',
+  // Fable 5
+  'claude-fable-5': 'github/claude-fable-5',
 };
 const up = db.prepare("INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES ('modelAliases', ?, ?)");
 const tx = db.transaction(() => { for (const [k, v] of Object.entries(aliases)) up.run(k, JSON.stringify(v)); });
@@ -229,7 +252,16 @@ tx();
 db.close();
 console.log('OK ' + Object.keys(aliases).length + ' aliases');
 "@ | Set-Content -Path $aliasSeeder -Encoding utf8
+# The seeder loads OmniRoute's native better-sqlite3 (a .node addon), which is built
+# for whichever Node arch ran `npm install`. Prefer the same Node we installed with
+# ($node.NodeExe); if that fails (ERR_DLOPEN_FAILED from an arch mismatch), fall back
+# to the host `node` whose arch matches the native build. Otherwise aliases silently
+# don't get seeded and teammates hit "Ambiguous model" errors.
 $seedOut = & $node.NodeExe $aliasSeeder 2>&1
+if ($LASTEXITCODE -ne 0 -and $node.Dir) {
+  Info "Alias seed under x64 Node failed; retrying under host node ($nodeArch)..."
+  $seedOut = & node $aliasSeeder 2>&1
+}
 if ($LASTEXITCODE -eq 0) { Ok "Model aliases seeded ($seedOut)" }
 else { Warn "Could not seed model aliases: $seedOut" }
 Remove-Item $aliasSeeder -ErrorAction SilentlyContinue
