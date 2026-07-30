@@ -1,15 +1,16 @@
 <#
 .SYNOPSIS
-  One-command bootstrap: install OmniRoute + create the claude-omni launcher, then
-  register the logon autostart task.
+  One-command bootstrap: install OmniRoute and route the default `claude` through it,
+  then register the logon autostart task.
 
 .DESCRIPTION
   Runs scripts\setup-omniroute.ps1 followed by scripts\install-autostart.ps1 so a fresh
-  machine goes from nothing to a working `claude-omni` in a single command. Both child
-  scripts are resolved relative to this file, so it works from wherever the repo is cloned.
+  machine goes from nothing to a working `claude` (routed through OmniRoute -> Copilot) in
+  a single command. Both child scripts are resolved relative to this file, so it works from
+  wherever the repo is cloned.
 
 .PARAMETER Model
-  Main model Claude Code should use (default: auto/best-coding).
+  Main model Claude Code should use (default: github/claude-opus-4.8).
 
 .PARAMETER Port
   OmniRoute server port, applied to both setup and autostart (default: 20128).
@@ -24,6 +25,9 @@
 .PARAMETER NoLaunch
   Do not open an interactive Claude Code session after setup.
 
+.PARAMETER AcceptRoutingChange
+  Skip the interactive confirmation pause before routing the default `claude`.
+
 .PARAMETER RefreshFeedAuth
   Refresh the Azure Artifacts feed token before installing (fixes TLS/401 errors).
 
@@ -35,11 +39,12 @@
 #>
 [CmdletBinding()]
 param(
-  [string]$Model = "auto/best-coding",
+  [string]$Model = "github/claude-opus-4.8",
   [int]$Port = 20128,
   [string]$X64NodeVersion = "20.18.1",
   [switch]$NoAutostart,
   [switch]$NoLaunch,
+  [switch]$AcceptRoutingChange,
   [switch]$RefreshFeedAuth
 )
 
@@ -56,8 +61,9 @@ Write-Host "`n=== OmniRoute bootstrap ===`n" -ForegroundColor White
 
 # --- 1. Setup ---------------------------------------------------------------
 $setupArgs = @{ Model = $Model; Port = $Port; X64NodeVersion = $X64NodeVersion }
-if ($NoLaunch)        { $setupArgs.NoLaunch = $true }
-if ($RefreshFeedAuth) { $setupArgs.RefreshFeedAuth = $true }
+if ($NoLaunch)            { $setupArgs.NoLaunch = $true }
+if ($AcceptRoutingChange) { $setupArgs.AcceptRoutingChange = $true }
+if ($RefreshFeedAuth)     { $setupArgs.RefreshFeedAuth = $true }
 # Always suppress the interactive launch until autostart is registered; re-launch after.
 $deferLaunch = -not $NoLaunch -and -not $NoAutostart
 if ($deferLaunch) { $setupArgs.NoLaunch = $true }
@@ -75,10 +81,10 @@ if ($NoAutostart) {
 }
 
 Write-Host "`n=== Bootstrap complete ===" -ForegroundColor Green
-Write-Host "  Launch: claude-omni"
+Write-Host "  Launch: claude"
 
 # Re-open the interactive session we deferred above.
 if ($deferLaunch) {
-  Write-Host "`nLaunching Claude Code (omniroute profile)..." -ForegroundColor Cyan
-  & claude-omni
+  Write-Host "`nLaunching Claude Code (routed through OmniRoute)..." -ForegroundColor Cyan
+  & claude
 }

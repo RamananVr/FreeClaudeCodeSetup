@@ -1,32 +1,42 @@
 # OmniRoute + Claude Code Setup (Windows)
 
-Scripts to install [OmniRoute](https://omniroute.dev) on Windows, wire **Claude Code** to
-route through OmniRoute → **GitHub Copilot**, and keep the router running so a
-`claude-omni` launcher always has a live backend.
+Scripts to install [OmniRoute](https://omniroute.dev) on Windows and route the default
+**`claude`** command through OmniRoute → **GitHub Copilot**, keeping the router running so
+`claude` always has a live backend.
 
 These scripts encode several hard-won Windows workarounds:
 
 - The direct `npm install -g omniroute` fails because a transitive dep pins
   `yuku-ast@0.6.5`, which is missing from some npm feeds. Setup installs into a staging
   dir with an `overrides` pin, then junctions it into the global `node_modules`.
-- `omniroute launch` uses `spawn("claude")` with no shell, which fails on Windows (the
-  bin is `claude.ps1`/`claude.cmd`). Setup writes a `claude-omni` wrapper that sets the
-  right env and invokes the real `claude` binary directly.
+- Routing lives in Claude Code's supported `settings.json` `env` block (no wrapper), so
+  plain `claude` routes through OmniRoute → Copilot. Because this changes your default
+  `claude`, setup shows a disclaimer and backs up your prior `settings.json` first.
 - On `win32-arm64` machines, OmniRoute's native deps (`wreq-js`) ship no arm64 binary.
   Setup detects ARM64 and automatically downloads a pinned, portable x64 Node (to
   `~/.omniroute/node-x64`, checksum-verified), runs the OmniRoute install under it, and
   bakes its absolute path into the generated `omniroute` shims — no manual steps, and
   your machine's default arm64 Node is left untouched.
 
+## What this changes
+
+- Your default `claude` now routes to GitHub Copilot via OmniRoute (default model
+  `github/claude-opus-4.8`).
+- Your prior `settings.json` is backed up to `settings.json.bak` — revert anytime by
+  restoring it.
+- Other connected providers show up in the in-session `/model` picker (gateway model
+  discovery is enabled), so you can switch without leaving Claude Code.
+
 ## Contents
 
 | Script | Purpose |
 | --- | --- |
-| `bootstrap.ps1`                 | One command: run setup then register autostart. Start here. |
-| `scripts/setup-omniroute.ps1`   | Install OmniRoute, create the `claude-omni` launcher, start the server, connect Copilot, seed model aliases. |
-| `scripts/ensure-x64-node.ps1`   | On ARM64, provision a pinned portable x64 Node (checksum-verified). No-op on x64. |
-| `scripts/start-omniroute.ps1`   | Idempotently start the server if it is not already up (health-checks first). |
-| `scripts/install-autostart.ps1` | Register/remove a per-user logon task that keeps the server running. |
+| `bootstrap.ps1`                      | One command: run setup then register autostart. Start here. |
+| `scripts/setup-omniroute.ps1`        | Install OmniRoute, route the default `claude` (settings.json), start the server, connect Copilot, seed model aliases. |
+| `scripts/configure-claude-routing.ps1` | Merge the OmniRoute routing `env` block into `settings.json` (idempotent; backs up to `.bak`). |
+| `scripts/ensure-x64-node.ps1`        | On ARM64, provision a pinned portable x64 Node (checksum-verified). No-op on x64. |
+| `scripts/start-omniroute.ps1`        | Idempotently start the server if it is not already up (health-checks first). |
+| `scripts/install-autostart.ps1`      | Register/remove a per-user logon task that keeps the server running. |
 
 ## Requirements
 
@@ -42,21 +52,21 @@ To pin a different x64 Node version on ARM64:
 ## Quick start
 
 ```powershell
-# One command: install + create launcher + start server + register autostart, then launch.
+# One command: install + route claude + start server + register autostart, then launch.
 pwsh -File .\bootstrap.ps1
 ```
 
 Or run the steps individually:
 
 ```powershell
-# 1. Install OmniRoute + create the claude-omni launcher + start the server.
+# 1. Install OmniRoute + route the default claude + start the server.
 pwsh -File .\scripts\setup-omniroute.ps1
 
 # 2. Make the server start automatically at logon (recommended).
 pwsh -File .\scripts\install-autostart.ps1
 
-# 3. Launch Claude Code routed through OmniRoute -> Copilot.
-claude-omni
+# 3. Launch Claude Code (now routed through OmniRoute -> Copilot).
+claude
 ```
 
 ### Common options
@@ -68,8 +78,11 @@ pwsh -File .\bootstrap.ps1 -Model github/claude-opus-4.8 -NoLaunch
 # Bootstrap setup only, skip the logon task.
 pwsh -File .\bootstrap.ps1 -NoAutostart
 
-# Pick the main model (default: auto/best-coding, router picks per request).
-pwsh -File .\scripts\setup-omniroute.ps1 -Model github/claude-opus-4.8
+# Skip the confirmation pause before routing your default claude (for unattended installs).
+pwsh -File .\bootstrap.ps1 -AcceptRoutingChange
+
+# Pick the main model (default: github/claude-opus-4.8; switch in-session via /model).
+pwsh -File .\scripts\setup-omniroute.ps1 -Model github/claude-sonnet-5
 
 # Set up everything but do not open an interactive session.
 pwsh -File .\scripts\setup-omniroute.ps1 -NoLaunch
@@ -82,17 +95,16 @@ pwsh -File .\scripts\setup-omniroute.ps1 -Port 20200
 pwsh -File .\scripts\install-autostart.ps1 -Port 20200
 ```
 
-## Using the launcher
+## Using Claude Code
 
 ```powershell
-claude-omni                                   # opus via OmniRoute -> Copilot
-claude-omni -p "prompt"                        # headless
-claude-omni --model github/claude-sonnet-5     # per-run model override
+claude                          # opus via OmniRoute -> Copilot
+claude -p "prompt"              # headless
+# In-session: run /model to switch to any other connected provider.
 ```
 
-`claude-omni` uses an isolated Claude Code profile at
-`~/.claude/profiles/omniroute`, so it does **not** touch your normal `claude`
-login/credentials.
+Routing is written into your Claude Code `settings.json` `env` block. To revert, restore
+`settings.json.bak` (or remove the OmniRoute keys from the `env` block).
 
 ## Autostart management
 
@@ -103,11 +115,13 @@ pwsh -File .\scripts\install-autostart.ps1 -Uninstall     # remove the task
 
 ## Troubleshooting
 
-- **`claude-omni` starts but no model responds / it hangs:** the OmniRoute server is
+- **`claude` starts but no model responds / it hangs:** the OmniRoute server is
   probably down. Run `pwsh -File .\scripts\start-omniroute.ps1` (or `omniroute serve`) and
   retry. The server takes ~20–30s to become healthy on a cold start.
 - **No Copilot models:** open `http://localhost:20128/dashboard/oauth` and connect
   GitHub Copilot.
+- **Want direct Anthropic access back:** restore `settings.json.bak` over your
+  `settings.json`.
 - **`better-sqlite3` / native module errors:** run `omniroute runtime repair`, or use a
   newer Node LTS (24.14.1+ recommended).
 

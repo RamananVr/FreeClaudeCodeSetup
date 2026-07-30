@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
   Register (or remove) a per-user logon scheduled task that keeps the OmniRoute server
-  running, so `claude-omni` always has a live backend.
+  running, so `claude` always has a live backend.
 
 .DESCRIPTION
   Creates a scheduled task named "OmniRoute Server" that runs scripts\start-omniroute.ps1
