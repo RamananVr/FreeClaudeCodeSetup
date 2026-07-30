@@ -1,8 +1,8 @@
 <#
 .SYNOPSIS
-  Install OmniRoute on Windows (working around the npm feed break), wire Claude Code
-  to route through OmniRoute -> GitHub Copilot, and launch Claude Code with an isolated
-  "omniroute" profile using Claude Opus as the main model.
+  Install OmniRoute on Windows (working around the npm feed break), and route the default
+  `claude` command through OmniRoute -> GitHub Copilot by writing routing config into
+  Claude Code's settings.json.
 
 .DESCRIPTION
   Encodes the hard-won learnings from getting `npm install -g omniroute` working on this
@@ -14,15 +14,16 @@
       dir with overrides { "yuku-ast": "0.6.7" }, then junction that package into the
       global node_modules and hand-write .cmd/.ps1 bin shims.
 
-    * `omniroute launch` uses spawn("claude") with no shell, which fails on Windows
-      (the bin is claude.ps1/claude.cmd). Fix: a `claude-omni` wrapper that sets the same
-      env OmniRoute would and invokes the real `claude` binary directly.
+    * Routing lives in Claude Code's supported settings.json `env` block (no wrapper),
+      so plain `claude` routes through OmniRoute -> Copilot. Because this changes the
+      user's default `claude`, setup shows a disclaimer, backs up the prior settings.json,
+      and (interactively) pauses before writing.
 
   The script is idempotent - safe to re-run.
 
 .PARAMETER Model
-  Main model Claude Code should use (default: github/claude-opus-4.8). Background/small
-  model is intentionally left to Claude Code's own default.
+  Main model Claude Code should use (default: github/claude-opus-4.8). Pinned as the
+  default; switch to any other connected provider in-session via /model.
 
 .PARAMETER StageDir
   Persistent staging directory for the npm install (default: $HOME\omniroute-stage).
@@ -33,6 +34,9 @@
 
 .PARAMETER NoLaunch
   Set up everything but do not launch the interactive Claude Code session at the end.
+
+.PARAMETER AcceptRoutingChange
+  Skip the interactive confirmation pause before writing routing config into settings.json.
 
 .PARAMETER RefreshFeedAuth
   Run vsts-npm-auth to refresh the Azure Artifacts feed token before installing
@@ -46,11 +50,12 @@
 #>
 [CmdletBinding()]
 param(
-  [string]$Model = "auto/best-coding",
+  [string]$Model = "github/claude-opus-4.8",
   [string]$StageDir = (Join-Path $env:USERPROFILE "omniroute-stage"),
   [int]$Port = 20128,
   [string]$X64NodeVersion = "20.18.1",
   [switch]$NoLaunch,
+  [switch]$AcceptRoutingChange,
   [switch]$RefreshFeedAuth
 )
 
@@ -153,41 +158,9 @@ Ok "Created omniroute / omniroute-reset-password shims"
 if (($env:Path -split ';') -notcontains $prefix) { $env:Path = "$prefix;$env:Path" }
 $omni = Join-Path $prefix "omniroute.cmd"
 
-# --- 4. claude-omni launcher (Windows-correct replacement for `omniroute launch`) ---
-$profileDir = Join-Path $env:USERPROFILE ".claude\profiles\omniroute"
-New-Item -ItemType Directory -Force -Path $profileDir | Out-Null
-
-$claudeOmniPs1 = @"
-#!/usr/bin/env pwsh
-# Launch Claude Code routed through OmniRoute (-> GitHub Copilot). Isolated profile;
-# does NOT touch your normal `claude` login/credentials.
-`$env:ANTHROPIC_BASE_URL = "http://localhost:$Port"
-Remove-Item Env:ANTHROPIC_API_KEY -ErrorAction SilentlyContinue
-`$env:ANTHROPIC_AUTH_TOKEN = "omniroute-no-auth"
-`$env:CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY = "1"
-`$env:CLAUDE_CODE_AUTO_COMPACT_WINDOW = "190000"
-`$env:CLAUDE_CONFIG_DIR = Join-Path `$env:USERPROFILE ".claude\profiles\omniroute"
-# Main model = auto/best-coding (router picks best backend per request); background/small model left to Claude Code's default.
-if (-not `$env:ANTHROPIC_MODEL) { `$env:ANTHROPIC_MODEL = "$Model" }
-& claude --dangerously-skip-permissions @args
-exit `$LASTEXITCODE
-"@
-Set-Content -Path (Join-Path $prefix "claude-omni.ps1") -Value $claudeOmniPs1 -Encoding utf8
-
-$claudeOmniCmd = @"
-@ECHO off
-SETLOCAL
-SET "ANTHROPIC_BASE_URL=http://localhost:$Port"
-SET "ANTHROPIC_API_KEY="
-SET "ANTHROPIC_AUTH_TOKEN=omniroute-no-auth"
-SET "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1"
-SET "CLAUDE_CODE_AUTO_COMPACT_WINDOW=190000"
-SET "CLAUDE_CONFIG_DIR=%USERPROFILE%\.claude\profiles\omniroute"
-IF "%ANTHROPIC_MODEL%"=="" SET "ANTHROPIC_MODEL=$Model"
-call claude.cmd --dangerously-skip-permissions %*
-"@
-Set-Content -Path (Join-Path $prefix "claude-omni.cmd") -Value $claudeOmniCmd -Encoding ascii
-Ok "Created claude-omni launcher (profile: $profileDir)"
+# --- 4. (removed) The former claude-omni wrapper is gone: routing now lives in
+#        Claude Code's settings.json env block (see section 6.6), so plain `claude`
+#        routes through OmniRoute -> Copilot. No separate launcher/profile.
 
 # --- 5. Start the OmniRoute server (if not already up) ----------------------
 $healthUrl = "http://localhost:$Port/api/monitoring/health"
@@ -222,7 +195,7 @@ if ($ghCount -gt 0) {
   Read-Host "Press ENTER once GitHub Copilot shows as connected in the dashboard"
   $ghCount = Get-CopilotModelCount
   if ($ghCount -gt 0) { Ok "GitHub Copilot connected ($ghCount models)" }
-  else { Warn "Still no Copilot models detected - you can finish connecting later and then run: claude-omni" }
+  else { Warn "Still no Copilot models detected - you can finish connecting later and then run: claude" }
 }
 
 # --- 6.5 Seed model aliases (route Claude Code's bare model IDs -> Copilot) ---
@@ -261,19 +234,36 @@ if ($LASTEXITCODE -eq 0) { Ok "Model aliases seeded ($seedOut)" }
 else { Warn "Could not seed model aliases: $seedOut" }
 Remove-Item $aliasSeeder -ErrorAction SilentlyContinue
 
+# --- 6.6 Route the DEFAULT `claude` through OmniRoute -----------------------
+# This changes the user's default `claude` command, so show a disclaimer and (when
+# interactive) pause for confirmation before writing settings.json.
+Write-Host ""
+Warn "This configures your DEFAULT ``claude`` to route through OmniRoute -> GitHub Copilot."
+Warn "After setup, running ``claude`` uses Copilot, not direct Anthropic access."
+Warn "Your previous settings.json is backed up to settings.json.bak (revert anytime)."
+
+$interactive = [Environment]::UserInteractive -and -not [Console]::IsInputRedirected
+if (-not $AcceptRoutingChange -and -not $NoLaunch -and $interactive) {
+  Read-Host "Press ENTER to continue, or Ctrl+C to cancel"
+}
+
+$configureRouting = Join-Path $PSScriptRoot "configure-claude-routing.ps1"
+& $configureRouting -Port $Port -Model $Model
+Ok "Default ``claude`` now routes through OmniRoute (model: $Model)"
+
 # --- 7. Summary + launch ----------------------------------------------------
 Write-Host "`n=== Setup complete ===" -ForegroundColor Green
 Write-Host "  OmniRoute       : http://localhost:$Port  (dashboard: http://localhost:$Port/dashboard)"
-Write-Host "  Main model      : $Model"
-Write-Host "  Launcher        : claude-omni   (isolated profile at $profileDir)"
-Write-Host "  Usage           : claude-omni                # opus via OmniRoute -> Copilot"
-Write-Host "                    claude-omni -p 'prompt'    # headless"
-Write-Host "                    claude-omni --model github/claude-sonnet-5   # per-run override"
+Write-Host "  Main model      : $Model  (change in-session via /model)"
+Write-Host "  Command         : claude   (routes through OmniRoute -> Copilot)"
+Write-Host "  Usage           : claude                # opus via OmniRoute -> Copilot"
+Write-Host "                    claude -p 'prompt'    # headless"
+Write-Host "                    /model in-session     # switch to any connected provider"
 Write-Host ""
 
 if ($NoLaunch) {
-  Info "-NoLaunch set. Skipping interactive launch. Run 'claude-omni' when ready."
+  Info "-NoLaunch set. Skipping interactive launch. Run 'claude' when ready."
 } else {
-  Info "Launching Claude Code (omniroute profile)..."
-  & (Join-Path $prefix "claude-omni.cmd") @()
+  Info "Launching Claude Code (routed through OmniRoute)..."
+  & claude
 }
