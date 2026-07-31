@@ -37,6 +37,8 @@ These scripts encode several hard-won Windows workarounds:
 | `scripts/ensure-x64-node.ps1`        | On ARM64, provision a pinned portable x64 Node (checksum-verified). No-op on x64. |
 | `scripts/start-omniroute.ps1`        | Idempotently start the server if it is not already up (health-checks first). |
 | `scripts/install-autostart.ps1`      | Register/remove a per-user logon task that keeps the server running. |
+| `scripts/claude-mcp-shim.cmd`        | (Agency users) Stand-in `claude` binary that repairs Agency's MCP config and resolves the real `claude.exe` robustly. |
+| `scripts/fix-mcp-config.ps1`         | Helper for the shim: strips the invalid string `tools` field Agency adds to http MCP servers. |
 
 ## Requirements
 
@@ -124,6 +126,11 @@ pwsh -File .\scripts\install-autostart.ps1 -Uninstall     # remove the task
   `settings.json`.
 - **`better-sqlite3` / native module errors:** run `omniroute runtime repair`, or use a
   newer Node LTS (24.14.1+ recommended).
+- **`agency claude` fails with `exit code 9009` / "resolved claude binary does not exist":**
+  Agency can inject `OMNI_REAL_CLAUDE` as a blank/whitespace value, which the older shim
+  treated as a real path. Point Agency's `AGENCY_CLAUDE_PATH` at
+  `scripts\claude-mcp-shim.cmd` (keep `fix-mcp-config.ps1` beside it) — the shim trims the
+  value and auto-detects the newest `~\.claude-cli\<version>\claude.exe`.
 
 ## License
 
