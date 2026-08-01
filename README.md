@@ -123,7 +123,10 @@ claude --model github/gpt-5.5 -p "hello"
 #   /model github/gpt-5.5
 ```
 
-Run `pwsh -File .\scripts\refresh-models.ps1` to see the full discovered list.
+Run `pwsh -File .\scripts\refresh-models.ps1 -ListOnly` to see the full discovered
+list without touching aliases. In a Claude Code session in this repo you can also
+just ask "list models" — the bundled `list-models` skill
+(`.claude/skills/list-models/`) runs that for you.
 A typed `/model` switch applies to the current session; the OmniRoute routing
 default in `settings.json` is what applies on the next launch.
 
