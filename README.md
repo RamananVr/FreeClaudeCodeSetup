@@ -111,15 +111,21 @@ Routing is written into your Claude Code `settings.json` `env` block. To revert,
 
 ### Selecting a Copilot model
 
-The in-session `/model` picker is Claude Code's built-in menu — it does **not**
-list the connected Copilot catalog. To use any specific discovered Copilot model,
-pass it on the command line:
+The in-session `/model` **arrow-key menu** shows only Claude Code's built-in
+entries — it does not enumerate the connected Copilot catalog. But you can switch
+to **any** discovered Copilot model two ways:
 
 ```powershell
-claude --model github/gpt-5.5 -p "hello"    # any discovered github/* model
+# At launch:
+claude --model github/gpt-5.5 -p "hello"
+
+# Mid-session: type the full id as an argument to /model (no restart):
+#   /model github/gpt-5.5
 ```
 
 Run `pwsh -File .\scripts\refresh-models.ps1` to see the full discovered list.
+A typed `/model` switch applies to the current session; the OmniRoute routing
+default in `settings.json` is what applies on the next launch.
 
 ### Refreshing the model list
 

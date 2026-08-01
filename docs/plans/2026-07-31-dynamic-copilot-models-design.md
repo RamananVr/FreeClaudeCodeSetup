@@ -142,18 +142,27 @@ Confirmed with the user's live session:
   (Default / Opus 1M / Sonnet / Sonnet 5 1M / Haiku / Opus 4). It does **not**
   enumerate the discovered `github/*` Copilot catalog. Seeding aliases does not,
   and cannot, inject models into this picker.
-- **Aliases fix routing/switching, not listing.** They make the built-in menu
-  entries route unambiguously to Copilot (no "Ambiguous model"), and they let any
-  discovered model be selected via the CLI: `claude --model github/<id>`
-  (verified: `claude --model github/gpt-5.5 -p ...` → `routed-ok`). The picker
-  header itself says: "For other/previous model names, specify with --model".
+- **Aliases fix routing/switching, not the arrow-key menu.** They make the
+  built-in menu entries route unambiguously to Copilot (no "Ambiguous model"),
+  and they let any discovered model be selected two ways:
+  - at launch: `claude --model github/<id>` (verified: `github/gpt-5.5` →
+    `routed-ok`);
+  - **mid-session: type the id into `/model`** — e.g. `/model github/gpt-5.5`
+    switches the live session immediately (verified: session confirmed
+    "I'm using github/gpt-5.5"). The arrow-key menu still shows only Claude
+    Code's built-in entries, but the typed-argument form reaches ANY connected
+    model. The picker header says as much: "specify with --model".
+  - Note: a typed `/model` change is saved as the new-session default too, but
+    the OmniRoute routing default written into `settings.json` is what applies on
+    the next launch.
 
-**Consequence for goals:** Goal 3 (setup-time seed of the full catalog) and the
-*switching* half of Goal 2 are met. The *listing* half of Goal 2 — the picker
-enumerating all 22 Copilot models — is **not achievable via alias seeding**; it
-is a Claude Code UI constraint. The supported path to any non-menu model is
-`--model github/<id>`. No code change fixes the picker; this is documented as the
-expected behavior.
+**Consequence for goals:** Goal 3 (setup-time seed of the full catalog) and
+Goal 2 (in-session switching to any Copilot model) are both **met**. Switching is
+done by typing the id into `/model` (`/model github/<id>`) or via
+`--model github/<id>` at launch — the alias seeding is what makes those resolve
+unambiguously. The only thing NOT achievable is having the arrow-key `/model`
+menu *enumerate* all 22 Copilot models; that list is Claude Code's fixed built-in
+UI. Discover the full list anytime with `refresh-models.ps1`.
 
 ## Error handling
 
