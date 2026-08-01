@@ -33,6 +33,7 @@ These scripts encode several hard-won Windows workarounds:
 | --- | --- |
 | `bootstrap.ps1`                      | One command: run setup then register autostart. Start here. |
 | `scripts/setup-omniroute.ps1`        | Install OmniRoute, route the default `claude` (settings.json), start the server, connect Copilot, seed model aliases. |
+| `scripts/refresh-models.ps1`         | Discover all connected GitHub Copilot models from `/v1/models` and (re-)seed their bare-id aliases so `/model` lists and switches to the full catalog. Run standalone anytime Copilot's catalog changes. |
 | `scripts/configure-claude-routing.ps1` | Merge the OmniRoute routing `env` block into `settings.json` (idempotent; backs up to `.bak`). |
 | `scripts/ensure-x64-node.ps1`        | On ARM64, provision a pinned portable x64 Node (checksum-verified). No-op on x64. |
 | `scripts/start-omniroute.ps1`        | Idempotently start the server if it is not already up (health-checks first). |
@@ -107,6 +108,37 @@ claude -p "prompt"              # headless
 
 Routing is written into your Claude Code `settings.json` `env` block. To revert, restore
 `settings.json.bak` (or remove the OmniRoute keys from the `env` block).
+
+### Selecting a Copilot model
+
+The in-session `/model` **arrow-key menu** shows only Claude Code's built-in
+entries — it does not enumerate the connected Copilot catalog. But you can switch
+to **any** discovered Copilot model two ways:
+
+```powershell
+# At launch:
+claude --model github/gpt-5.5 -p "hello"
+
+# Mid-session: type the full id as an argument to /model (no restart):
+#   /model github/gpt-5.5
+```
+
+Run `pwsh -File .\scripts\refresh-models.ps1` to see the full discovered list.
+A typed `/model` switch applies to the current session; the OmniRoute routing
+default in `settings.json` is what applies on the next launch.
+
+### Refreshing the model list
+
+Setup seeds bare-id aliases so Claude Code's model ids route unambiguously to
+Copilot. If GitHub Copilot adds or removes models, re-seed the catalog:
+
+```powershell
+# Re-discover connected Copilot models and (re-)seed their aliases.
+pwsh -File .\scripts\refresh-models.ps1
+```
+
+This is idempotent and only touches aliases that are new or already point at a `github/*`
+model — aliases owned by other providers are left untouched.
 
 ## Autostart management
 

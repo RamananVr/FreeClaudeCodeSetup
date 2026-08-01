@@ -198,73 +198,16 @@ if ($ghCount -gt 0) {
   else { Warn "Still no Copilot models detected - you can finish connecting later and then run: claude" }
 }
 
-# --- 6.5 Seed model aliases (route Claude Code's bare model IDs -> Copilot) ---
+# --- 6.5 Seed model aliases (dynamic discovery from /v1/models) -------------
 # Claude Code (esp. via /model or gateway discovery) can send unprefixed canonical
-# ids like "claude-opus-4-8". OmniRoute then sees that id on several providers
-# (cc/kie/vp) and fails with "Ambiguous model". These aliases pin those bare ids
-# to the GitHub Copilot (github/*) models so routing is unambiguous.
-Info "Seeding model aliases (bare Claude ids -> github/* Copilot models)..."
-$aliasSeeder = Join-Path $env:TEMP "omniroute-seed-aliases.cjs"
-@"
-const path = require('path');
-const pkg = path.join('$StageDir', 'node_modules', 'omniroute');
-let Database;
-for (const p of [
-  path.join(pkg, 'node_modules', 'better-sqlite3'),
-  path.join(pkg, 'node_modules', '@omniroute', 'better-sqlite3'),
-  path.join(pkg, 'dist', 'node_modules', 'better-sqlite3'),
-]) { try { Database = require(p); break; } catch (_) {} }
-if (!Database) { console.error('better-sqlite3 not found; skipping alias seed'); process.exit(0); }
-const dbPath = path.join(process.env.USERPROFILE, '.omniroute', 'storage.sqlite');
-const db = new Database(dbPath);
-// Keys = the exact bare ids Claude Code emits (incl. the DATED background/small
-// model id it hardcodes, e.g. claude-haiku-4-5-20251001). Values = unambiguous
-// github/* Copilot models. Cover hyphen, dotted, and dated forms so no bare id
-// Claude Code sends can collide across providers.
-const aliases = {
-  // Opus 4.8 (main)
-  'claude-opus-4-8': 'github/claude-opus-4.8',
-  'claude-opus-4.8': 'github/claude-opus-4.8',
-  'claude-opus-4-8-fast': 'github/claude-opus-4.8-fast',
-  'claude-opus-4.8-fast': 'github/claude-opus-4.8-fast',
-  // Opus 4.7 / 4.5
-  'claude-opus-4-7': 'github/claude-opus-4.7',
-  'claude-opus-4.7': 'github/claude-opus-4.7',
-  'claude-opus-4-5': 'github/claude-opus-4.5',
-  'claude-opus-4.5': 'github/claude-opus-4.5',
-  // Sonnet 5 / 4.6 / 4.5
-  'claude-sonnet-5': 'github/claude-sonnet-5',
-  'claude-sonnet-4-6': 'github/claude-sonnet-4.6',
-  'claude-sonnet-4.6': 'github/claude-sonnet-4.6',
-  'claude-sonnet-4-5': 'github/claude-sonnet-4.5',
-  'claude-sonnet-4.5': 'github/claude-sonnet-4.5',
-  // Haiku 4.5 (background / small model) -- includes the DATED id that caused
-  // the "Ambiguous model 'claude-haiku-4-5-20251001'" failures.
-  'claude-haiku-4-5': 'github/claude-haiku-4.5',
-  'claude-haiku-4.5': 'github/claude-haiku-4.5',
-  'claude-haiku-4-5-20251001': 'github/claude-haiku-4.5',
-  // Fable 5
-  'claude-fable-5': 'github/claude-fable-5',
-};
-const up = db.prepare("INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES ('modelAliases', ?, ?)");
-const tx = db.transaction(() => { for (const [k, v] of Object.entries(aliases)) up.run(k, JSON.stringify(v)); });
-tx();
-db.close();
-console.log('OK ' + Object.keys(aliases).length + ' aliases');
-"@ | Set-Content -Path $aliasSeeder -Encoding utf8
-# The seeder loads OmniRoute's native better-sqlite3 (a .node addon), which is built
-# for whichever Node arch ran `npm install`. Prefer the same Node we installed with
-# ($node.NodeExe); if that fails (ERR_DLOPEN_FAILED from an arch mismatch), fall back
-# to the host `node` whose arch matches the native build. Otherwise aliases silently
-# don't get seeded and teammates hit "Ambiguous model" errors.
-$seedOut = & $node.NodeExe $aliasSeeder 2>&1
-if ($LASTEXITCODE -ne 0 -and $node.Dir) {
-  Info "Alias seed under x64 Node failed; retrying under host node ($nodeArch)..."
-  $seedOut = & node $aliasSeeder 2>&1
-}
-if ($LASTEXITCODE -eq 0) { Ok "Model aliases seeded ($seedOut)" }
-else { Warn "Could not seed model aliases: $seedOut" }
-Remove-Item $aliasSeeder -ErrorAction SilentlyContinue
+# ids like "claude-opus-4-8". OmniRoute then sees that id on several providers and
+# fails with "Ambiguous model". refresh-models.ps1 discovers every connected
+# github/* Copilot model and seeds bare-id aliases for them (with a clobber guard
+# so aliases owned by other providers are left intact). Single source of truth,
+# reusable standalone to re-seed when the catalog changes.
+Info "Seeding model aliases from discovered Copilot catalog..."
+$refresh = Join-Path $PSScriptRoot "refresh-models.ps1"
+& $refresh -Port $Port -StageDir $StageDir
 
 # --- 6.6 Route the DEFAULT `claude` through OmniRoute -----------------------
 # This changes the user's default `claude` command, so show a disclaimer and (when
