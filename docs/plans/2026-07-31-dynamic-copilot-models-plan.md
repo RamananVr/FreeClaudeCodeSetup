@@ -94,6 +94,13 @@ git commit -m "Add refresh-models.ps1 discovery skeleton"
 **Files:**
 - Modify: `scripts/refresh-models.ps1`
 
+> **Note (post-implementation):** the shipped script is the source of truth. It
+> differs from the snippet below in two review-driven ways: the alias map is
+> passed to the seeder via a **temp `.json` file** read with `fs.readFileSync`
+> (not a native-exe arg — embedded JSON quotes get mangled under Windows
+> PowerShell 5.1), and the node invocation is wrapped in `try/catch` so a missing
+> host `node` falls through to the x64 candidate.
+
 **Step 1: Append the seeder generation + execution**
 
 Build an alias map in PowerShell (so key-generation logic is testable/visible), then hand it to a generated CJS seeder as JSON. Key generation per `github/<base>`: prefix-stripped, dotted→hyphen, hyphen→dotted (version segment). Fold in the dated-id override map here ONLY if Task 0 findings require it.
