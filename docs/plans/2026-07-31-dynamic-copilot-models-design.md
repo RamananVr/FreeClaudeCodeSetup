@@ -134,6 +134,27 @@ exist OR its existing value is a `github/*` id. Keys mapped to non-github
 providers are left untouched. The dated `claude-haiku-4-5-20251001` override is
 included.
 
+### Interactive `/model` finding (2026-07-31) — RESOLVES the open question
+
+Confirmed with the user's live session:
+
+- The in-session `/model` picker is Claude Code's **built-in, fixed menu**
+  (Default / Opus 1M / Sonnet / Sonnet 5 1M / Haiku / Opus 4). It does **not**
+  enumerate the discovered `github/*` Copilot catalog. Seeding aliases does not,
+  and cannot, inject models into this picker.
+- **Aliases fix routing/switching, not listing.** They make the built-in menu
+  entries route unambiguously to Copilot (no "Ambiguous model"), and they let any
+  discovered model be selected via the CLI: `claude --model github/<id>`
+  (verified: `claude --model github/gpt-5.5 -p ...` → `routed-ok`). The picker
+  header itself says: "For other/previous model names, specify with --model".
+
+**Consequence for goals:** Goal 3 (setup-time seed of the full catalog) and the
+*switching* half of Goal 2 are met. The *listing* half of Goal 2 — the picker
+enumerating all 22 Copilot models — is **not achievable via alias seeding**; it
+is a Claude Code UI constraint. The supported path to any non-menu model is
+`--model github/<id>`. No code change fixes the picker; this is documented as the
+expected behavior.
+
 ## Error handling
 
 - `/v1/models` unreachable or zero `github/*` ids → warn, skip seeding, do not

@@ -109,10 +109,22 @@ claude -p "prompt"              # headless
 Routing is written into your Claude Code `settings.json` `env` block. To revert, restore
 `settings.json.bak` (or remove the OmniRoute keys from the `env` block).
 
+### Selecting a Copilot model
+
+The in-session `/model` picker is Claude Code's built-in menu — it does **not**
+list the connected Copilot catalog. To use any specific discovered Copilot model,
+pass it on the command line:
+
+```powershell
+claude --model github/gpt-5.5 -p "hello"    # any discovered github/* model
+```
+
+Run `pwsh -File .\scripts\refresh-models.ps1` to see the full discovered list.
+
 ### Refreshing the model list
 
-The `/model` picker lists the Copilot models that have seeded aliases. Setup seeds these
-automatically, but if GitHub Copilot adds or removes models, re-seed the full catalog:
+Setup seeds bare-id aliases so Claude Code's model ids route unambiguously to
+Copilot. If GitHub Copilot adds or removes models, re-seed the catalog:
 
 ```powershell
 # Re-discover connected Copilot models and (re-)seed their aliases.
