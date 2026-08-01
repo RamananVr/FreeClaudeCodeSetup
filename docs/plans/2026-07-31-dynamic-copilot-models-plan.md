@@ -126,7 +126,7 @@ Info "Prepared $($aliases.Count) candidate alias keys for $($models.Count) model
 $seeder = Join-Path $env:TEMP "omniroute-seed-aliases.cjs"
 @"
 const path = require('path');
-const stage = '$StageDir';
+const stage = '$($StageDir -replace '\\','\\\\')';   // double backslashes for the JS string
 let Database;
 for (const p of [
   path.join(stage, 'node_modules', 'better-sqlite3'),
@@ -136,7 +136,7 @@ for (const p of [
 if (!Database) { console.error('better-sqlite3 not found; skipping alias seed'); process.exit(2); }
 const dbPath = path.join(process.env.USERPROFILE, '.omniroute', 'storage.sqlite');
 const db = new Database(dbPath);
-const aliases = JSON.parse(process.argv[1]);
+const aliases = JSON.parse(process.argv[2]);   // argv[2] = first CLI arg (argv[1] is script path)
 // Clobber guard: only write a key if it is new OR already points at a github/*
 // value. Bare ids already mapped to other providers (agy/*, gemini/*) are left
 // untouched so we don't break Agency-seeded routing.
