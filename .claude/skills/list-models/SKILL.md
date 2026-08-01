@@ -17,16 +17,31 @@ change routing or seed aliases.
 
 ## How to run
 
-From the repo root, run the list-only mode of the discovery script:
+From the repo root, run the list-only mode of the discovery script for the
+current OS.
+
+**Windows:**
 
 ```powershell
-pwsh -File .\scripts\refresh-models.ps1 -ListOnly
+pwsh -File .\windows\scripts\refresh-models.ps1 -ListOnly
+```
+
+**macOS:**
+
+```bash
+bash ./macos/scripts/refresh-models.sh --list-only
 ```
 
 If a non-default port was configured, pass it through:
 
 ```powershell
-pwsh -File .\scripts\refresh-models.ps1 -ListOnly -Port 20200
+# Windows
+pwsh -File .\windows\scripts\refresh-models.ps1 -ListOnly -Port 20200
+```
+
+```bash
+# macOS
+bash ./macos/scripts/refresh-models.sh --list-only --port 20200
 ```
 
 The command prints one `github/<id>` per line (sorted, de-duplicated).

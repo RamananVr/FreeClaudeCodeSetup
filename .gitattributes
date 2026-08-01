@@ -1,0 +1,8 @@
+# Shell scripts must keep LF endings so they run on macOS/Linux even when
+# checked out on Windows.
+*.sh   text eol=lf
+*.plist text eol=lf
+
+# Windows scripts keep CRLF.
+*.ps1  text eol=crlf
+*.cmd  text eol=crlf
