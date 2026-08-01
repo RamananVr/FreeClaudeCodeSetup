@@ -51,7 +51,7 @@ git commit -m "Record verification findings for dynamic model seeding"
 [CmdletBinding()]
 param(
   [int]$Port = 20128,
-  [string]$StageDir
+  [string]$StageDir = (Join-Path $env:USERPROFILE "omniroute-stage")
 )
 $ErrorActionPreference = "Stop"
 function Info($m){ Write-Host "[*] $m" }
@@ -107,59 +107,87 @@ function Get-AliasKeys([string]$id) {
   [void]$keys.Add(($base -replace '(\d)-(\d)', '$1.$2'))    # hyphen -> dotted
   $keys
 }
+# Scope: all github/* EXCEPT embeddings (text-embedding-*). Dedup gh// github/
+# to the github/ form.
+$models = $ids |
+  Where-Object { $_ -notmatch 'text-embedding' } |
+  ForEach-Object { if ($_ -match '^gh/') { $_ -replace '^gh/', 'github/' } else { $_ } } |
+  Select-Object -Unique
 $aliases = @{}
-foreach ($id in $ids) {
-  $full = if ($id -match '^gh/') { $id -replace '^gh/', 'github/' } else { $id }
-  foreach ($k in (Get-AliasKeys $id)) { $aliases[$k] = $full }
+foreach ($full in $models) {
+  foreach ($k in (Get-AliasKeys $full)) { $aliases[$k] = $full }
 }
-# --- dated-id overrides (only if Task 0 proved they are still emitted) ---
-# $aliases['claude-haiku-4-5-20251001'] = 'github/claude-haiku-4.5'
+# --- dated-id override (verification confirmed Claude Code still emits this) ---
+$aliases['claude-haiku-4-5-20251001'] = 'github/claude-haiku-4.5'
 
 $aliasJson = ($aliases | ConvertTo-Json -Compress)
-Info "Seeding $($aliases.Count) alias keys..."
+Info "Prepared $($aliases.Count) candidate alias keys for $($models.Count) models..."
 
 $seeder = Join-Path $env:TEMP "omniroute-seed-aliases.cjs"
 @"
 const path = require('path');
-const pkg = path.join('$StageDir', 'node_modules', 'omniroute');
+const stage = '$StageDir';
 let Database;
 for (const p of [
-  path.join(pkg, 'node_modules', 'better-sqlite3'),
-  path.join(pkg, 'node_modules', '@omniroute', 'better-sqlite3'),
-  path.join(pkg, 'dist', 'node_modules', 'better-sqlite3'),
+  path.join(stage, 'node_modules', 'better-sqlite3'),
+  path.join(stage, 'node_modules', 'omniroute', 'node_modules', 'better-sqlite3'),
+  path.join(stage, 'node_modules', 'omniroute', 'dist', 'node_modules', 'better-sqlite3'),
 ]) { try { Database = require(p); break; } catch (_) {} }
-if (!Database) { console.error('better-sqlite3 not found; skipping alias seed'); process.exit(0); }
+if (!Database) { console.error('better-sqlite3 not found; skipping alias seed'); process.exit(2); }
 const dbPath = path.join(process.env.USERPROFILE, '.omniroute', 'storage.sqlite');
 const db = new Database(dbPath);
 const aliases = JSON.parse(process.argv[1]);
+// Clobber guard: only write a key if it is new OR already points at a github/*
+// value. Bare ids already mapped to other providers (agy/*, gemini/*) are left
+// untouched so we don't break Agency-seeded routing.
+const existing = new Map(
+  db.prepare("SELECT key,value FROM key_value WHERE namespace='modelAliases'")
+    .all().map(r => [r.key, JSON.parse(r.value)])
+);
 const up = db.prepare("INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES ('modelAliases', ?, ?)");
-const tx = db.transaction(() => { for (const [k, v] of Object.entries(aliases)) up.run(k, JSON.stringify(v)); });
+let wrote = 0, skipped = 0;
+const tx = db.transaction(() => {
+  for (const [k, v] of Object.entries(aliases)) {
+    const cur = existing.get(k);
+    if (cur !== undefined && !/^(gh|github)\//.test(cur)) { skipped++; continue; }
+    up.run(k, JSON.stringify(v)); wrote++;
+  }
+});
 tx();
 db.close();
-console.log('OK ' + Object.keys(aliases).length + ' aliases');
+console.log('OK wrote=' + wrote + ' skipped=' + skipped);
 "@ | Set-Content -Path $seeder -Encoding utf8
 
-# Prefer arch-correct x64 Node if present; fall back to host node.
-$x64 = Join-Path $env:USERPROFILE ".omniroute\node-x64\node.exe"
-$nodeExe = if (Test-Path $x64) { $x64 } else { "node" }
-$out = & $nodeExe $seeder $aliasJson 2>&1
-if ($LASTEXITCODE -ne 0 -and $nodeExe -ne "node") {
-  Info "Seed under x64 Node failed; retrying under host node..."
-  $out = & node $seeder $aliasJson 2>&1
+# ARM64 note: the native better-sqlite3 is built for whichever Node ran the
+# OmniRoute install. On this host that is arm64, so the HOST node loads it and a
+# nested x64 node fails with ERR_DLOPEN_FAILED. Try host node first, then any
+# provisioned x64 node as a fallback (covers x64 hosts where the reverse holds).
+$x64 = Get-ChildItem -Path (Join-Path $env:USERPROFILE ".omniroute\node-x64") -Recurse -Filter node.exe -ErrorAction SilentlyContinue |
+  Select-Object -First 1 -ExpandProperty FullName
+$candidates = @("node")
+if ($x64) { $candidates += $x64 }
+$out = $null; $seeded = $false
+foreach ($n in $candidates) {
+  $out = & $n $seeder $aliasJson 2>&1
+  if ($LASTEXITCODE -eq 0) { $seeded = $true; break }
+  Info "Seed under '$n' failed (exit $LASTEXITCODE); trying next node..."
 }
-if ($LASTEXITCODE -eq 0) { Ok "Model aliases seeded ($out)" }
+if ($seeded) { Ok "Model aliases seeded ($out)" }
 else { Warn "Could not seed model aliases: $out" }
 Remove-Item $seeder -ErrorAction SilentlyContinue
 ```
 
 **Step 2: Run standalone and verify seeding**
 
-Run: `pwsh -File .\scripts\refresh-models.ps1 -StageDir "$env:USERPROFILE\.omniroute\stage"`
-Expected: "Model aliases seeded (OK N aliases)" where N ≈ discovered count × variants.
+Run: `pwsh -File .\scripts\refresh-models.ps1 -StageDir "$env:USERPROFILE\omniroute-stage"`
+Expected: "Model aliases seeded (OK wrote=N skipped=M)". `skipped` accounts for any
+bare id already owned by a non-github provider (e.g. Agency's `gemini-*`).
 
-**Step 3: Verify idempotency**
+**Step 3: Verify idempotency + no clobber**
 
-Run the same command again. Expected: identical count, no errors.
+Re-run. Expected: same `wrote`/`skipped`, no errors. Then re-snapshot `modelAliases`
+and confirm the pre-existing `agy/*` / `gemini/*` entries (e.g.
+`gemini-3.1-pro-preview -> agy/…`) are unchanged.
 
 **Step 4: Verify the picker**
 
@@ -236,4 +264,6 @@ git commit -m "Document refresh-models.ps1 in README"
 - **DRY:** the seeder logic lives ONLY in `refresh-models.ps1`; setup must call it, never re-inline.
 - **YAGNI:** do not add the dated-id override map unless Task 0 proves it is needed.
 - **Idempotent:** `INSERT OR REPLACE` — every task is safe to re-run.
-- **Arch note:** the native better-sqlite3 must be loaded by the Node arch that built it; the x64-first / host-fallback pattern handles ARM64 hosts.
+- **Arch note:** the native better-sqlite3 must be loaded by the Node arch that built it. On this ARM64 host the **host node** loads it and a nested x64 node fails (`ERR_DLOPEN_FAILED`); the seeder tries host node first, then a provisioned x64 node as fallback.
+- **Clobber guard:** never overwrite a bare-id alias that points at a non-`github/*` provider (Agency's `agy/*`/`gemini/*`). Verified these exist in the live table.
+- **Embeddings excluded:** `text-embedding-*` are filtered out — not selectable in `/model`.

@@ -99,6 +99,41 @@ Drives two decisions: (a) whether listing needs seeding or only switching does,
 and (b) whether the dated-id override map is required. Findings recorded here
 after the check.
 
+### Verification findings (2026-07-31)
+
+Ran the non-interactive checks (interactive `/model` picker check deferred to user).
+
+- **Host is ARM64.** The staged `better_sqlite3.node` is an **arm64** build, so the
+  x64 Node *cannot* load it (`ERR_DLOPEN_FAILED`); only the **host arm64 node**
+  seeds successfully. The seeder must try both and the host-node fallback is what
+  actually works here. (Native module arch = whichever node ran `npm install`.)
+- **Path corrections for the plan:**
+  - `StageDir` default is `~/omniroute-stage` (not `~/.omniroute/stage`).
+  - x64 Node is nested: `~/.omniroute/node-x64/node-v20.18.1-win-x64/node.exe`
+    (must glob for `node.exe`, not assume a fixed path).
+  - better-sqlite3 resolves via the existing require list's dist path
+    (`StageDir/node_modules/omniroute/dist/node_modules/better-sqlite3`) — keep it.
+- **`/v1/models` returns 23 unique `github/*` models** (46 rows counting both
+  `gh/` and `github/` prefixes): 9 Claude, plus gpt-*, gemini-*, kimi, mai-code,
+  oswe, and 2 `text-embedding-*`.
+- **Existing `modelAliases` has 23 entries.** Critically, some bare ids are
+  already mapped to **other providers** — e.g. `gemini-3.1-pro-preview -> agy/…`,
+  `gemini-3-pro-high -> agy/…`, `gemini-3.1-flash-lite-preview -> gemini/…`
+  (seeded outside this repo, likely Agency). Seeding bare-id aliases for *all*
+  discovered `github/*` models would **clobber** these via `INSERT OR REPLACE`.
+- **Dated-id override IS required.** Claude Code still emits the dated
+  `claude-haiku-4-5-20251001`, which is not derivable from the catalog id
+  `github/claude-haiku-4.5`. Approach-C fallback (small override map) is needed
+  for at least this id.
+
+**Scope decision (resolved 2026-07-31):** seed bare-id aliases for **all
+discovered `github/*` models except `text-embedding-*`**. To avoid clobbering
+bare-id aliases already pointing at other providers (Agency's `agy/*`, `gemini/*`),
+the seeder applies a **clobber guard**: write a key only if it does not already
+exist OR its existing value is a `github/*` id. Keys mapped to non-github
+providers are left untouched. The dated `claude-haiku-4-5-20251001` override is
+included.
+
 ## Error handling
 
 - `/v1/models` unreachable or zero `github/*` ids → warn, skip seeding, do not
