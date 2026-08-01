@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
   [int]$Port = 20128,
-  [string]$StageDir = (Join-Path $env:USERPROFILE "omniroute-stage")
+  [string]$StageDir = (Join-Path $env:USERPROFILE "omniroute-stage"),
+  [switch]$ListOnly
 )
 $ErrorActionPreference = "Stop"
 function Info($m){ Write-Host "[*] $m" }
@@ -21,8 +22,14 @@ if ($ids.Count -eq 0) {
   Warn "Connect GitHub Copilot at http://localhost:$Port/dashboard/oauth then re-run."
   exit 0
 }
-Info "Discovered $($ids.Count) Copilot models:"
-$ids | ForEach-Object { Write-Host "    $_" }
+# Unique catalog in the github/ form (the gh/ and github/ prefixes are duplicates).
+$catalog = $ids |
+  ForEach-Object { if ($_ -match '^gh/') { $_ -replace '^gh/', 'github/' } else { $_ } } |
+  Select-Object -Unique |
+  Sort-Object
+Info "Discovered $($catalog.Count) Copilot models:"
+$catalog | ForEach-Object { Write-Host "    $_" }
+if ($ListOnly) { exit 0 }
 
 function Get-AliasKeys([string]$id) {
   $base = $id -replace '^(gh|github)/', ''
