@@ -76,11 +76,11 @@ mkdir -p "$HOME/.omniroute"
 LOG_FILE="$HOME/.omniroute/omniroute-server.log"
 
 info "Starting OmniRoute server on port $PORT..."
-nohup "${PREFIX[@]+"${PREFIX[@]}"}" "$omni" serve >"$LOG_FILE" 2>&1 &
+nohup "${PREFIX[@]+"${PREFIX[@]}"}" "$omni" serve --port "$PORT" --no-open >"$LOG_FILE" 2>&1 &
 server_pid=$!
 
-# --- Poll until healthy, up to a 90s wall-clock deadline -------------------------
-deadline=$(( $(date +%s) + 90 ))
+# --- Poll until healthy, up to a 180s wall-clock deadline ------------------------
+deadline=$(( $(date +%s) + 180 ))
 while [ "$(date +%s)" -lt "$deadline" ]; do
   # Fail fast if the server process died (bad install, port in use, Rosetta missing).
   if ! kill -0 "$server_pid" 2>/dev/null; then
@@ -94,5 +94,5 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
   sleep 3
 done
 
-warn "OmniRoute did not become healthy within 90s. Check $LOG_FILE for details."
+warn "OmniRoute did not become healthy within 180s. Check $LOG_FILE for details."
 exit 1

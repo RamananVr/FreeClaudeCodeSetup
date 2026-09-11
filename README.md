@@ -4,6 +4,9 @@ Scripts to install [OmniRoute](https://omniroute.dev) and route the default **`c
 command through OmniRoute → **GitHub Copilot**, keeping the router running so `claude`
 always has a live backend.
 
+The setup scripts currently install **OmniRoute 3.8.50** and require Node.js
+**22.22.2** (or a supported Node 24+ release).
+
 The repo is split by operating system:
 
 | Directory | Platform | Entry point |
@@ -12,9 +15,9 @@ The repo is split by operating system:
 | [`macos/`](#macos)     | macOS (Intel / Apple Silicon) | `macos/bootstrap.sh` |
 
 Both do the same thing: install OmniRoute, route the default `claude` through it via
-Claude Code's `settings.json`, start the local server, connect GitHub Copilot, seed
-model aliases, and register an autostart agent (Scheduled Task on Windows, launchd on
-macOS).
+Claude Code's `settings.json`, start the local server, connect GitHub Copilot, show
+the model catalog, and register an autostart agent (Scheduled Task on Windows,
+launchd on macOS).
 
 ## What this changes
 
@@ -45,7 +48,8 @@ Encodes several hard-won Windows workarounds:
 ### Requirements
 
 - Windows 10/11, PowerShell 7 (`pwsh`) recommended.
-- Node.js on `PATH`. On ARM64, setup auto-provisions an x64 Node for OmniRoute.
+- Node.js 22.22.2 or a supported Node 24+ release on `PATH`. On ARM64, setup
+  auto-provisions a compatible x64 Node for OmniRoute.
 - Claude Code installed (`claude` on `PATH`).
 - A GitHub Copilot subscription (connected via the OmniRoute dashboard on first run).
 
@@ -54,8 +58,8 @@ Encodes several hard-won Windows workarounds:
 | Script | Purpose |
 | --- | --- |
 | `windows\bootstrap.ps1`                      | One command: run setup then register autostart. Start here. |
-| `windows\scripts\setup-omniroute.ps1`        | Install OmniRoute, route the default `claude`, start the server, connect Copilot, seed model aliases. |
-| `windows\scripts\refresh-models.ps1`         | Discover connected Copilot models from `/v1/models` and (re-)seed bare-id aliases. Run standalone anytime the catalog changes. |
+| `windows\scripts\setup-omniroute.ps1`        | Install OmniRoute, route the default `claude`, start the server, connect Copilot, show the model catalog. |
+| `windows\scripts\refresh-models.ps1`         | List connected Copilot models through OmniRoute's authenticated management API. |
 | `windows\scripts\configure-claude-routing.ps1` | Merge the OmniRoute routing `env` block into `settings.json` (idempotent; backs up to `.bak`). |
 | `windows\scripts\ensure-x64-node.ps1`        | On ARM64, provision a pinned portable x64 Node (checksum-verified). No-op on x64. |
 | `windows\scripts\start-omniroute.ps1`        | Idempotently start the server if it is not already up. |
@@ -90,8 +94,16 @@ pwsh -File .\windows\bootstrap.ps1 -NoAutostart
 # Skip the confirmation pause before routing your default claude (unattended installs).
 pwsh -File .\windows\bootstrap.ps1 -AcceptRoutingChange
 
-# Pin a different x64 Node version on ARM64.
-pwsh -File .\windows\bootstrap.ps1 -X64NodeVersion 22.11.0
+# Pin a different supported x64 Node version on ARM64.
+pwsh -File .\windows\bootstrap.ps1 -X64NodeVersion 22.22.2
+
+# Install another OmniRoute release explicitly.
+pwsh -File .\windows\bootstrap.ps1 -OmniRouteVersion 3.8.50
+
+# If API authentication is enabled, provide a dedicated inference key without
+# putting it on the command line.
+$env:OMNIROUTE_API_KEY = "<your OmniRoute API key>"
+pwsh -File .\windows\bootstrap.ps1
 
 # Refresh Azure Artifacts feed auth before installing (fixes TLS/401 errors).
 pwsh -File .\windows\scripts\setup-omniroute.ps1 -RefreshFeedAuth
@@ -130,7 +142,8 @@ platform differences:
 ### Requirements
 
 - macOS (Intel or Apple Silicon). On Apple Silicon, Rosetta 2 (setup prompts if missing).
-- Node.js + npm on `PATH` (`brew install node`, or nvm).
+- Node.js 22.22.2 or a supported Node 24+ release plus npm on `PATH`
+  (`brew install node`, or nvm).
 - Claude Code installed (`claude` on `PATH`).
 - A GitHub Copilot subscription (connected via the OmniRoute dashboard on first run).
 
@@ -139,8 +152,8 @@ platform differences:
 | Script | Purpose |
 | --- | --- |
 | `macos/bootstrap.sh`                      | One command: run setup then register autostart. Start here. |
-| `macos/scripts/setup-omniroute.sh`        | Install OmniRoute, route the default `claude`, start the server, connect Copilot, seed model aliases. |
-| `macos/scripts/refresh-models.sh`         | Discover connected Copilot models from `/v1/models` and (re-)seed bare-id aliases. Run standalone anytime the catalog changes. |
+| `macos/scripts/setup-omniroute.sh`        | Install OmniRoute, route the default `claude`, start the server, connect Copilot, show the model catalog. |
+| `macos/scripts/refresh-models.sh`         | List connected Copilot models through OmniRoute's authenticated management API. |
 | `macos/scripts/configure-claude-routing.sh` | Merge the OmniRoute routing `env` block into `settings.json` (idempotent; backs up to `.bak`). |
 | `macos/scripts/ensure-x64-node.sh`        | On Apple Silicon, provision a pinned portable x64 Node under Rosetta (checksum-verified). No-op on Intel. |
 | `macos/scripts/start-omniroute.sh`        | Idempotently start the server if it is not already up. |
@@ -174,8 +187,16 @@ bash ./macos/bootstrap.sh --no-autostart
 # Skip the confirmation pause before routing your default claude (unattended installs).
 bash ./macos/bootstrap.sh --accept-routing-change
 
-# Pin a different x64 Node version on Apple Silicon.
-bash ./macos/bootstrap.sh --x64-node-version 22.11.0
+# Pin a different supported x64 Node version on Apple Silicon.
+bash ./macos/bootstrap.sh --x64-node-version 22.22.2
+
+# Install another OmniRoute release explicitly.
+bash ./macos/bootstrap.sh --omniroute-version 3.8.50
+
+# If API authentication is enabled, provide a dedicated inference key without
+# putting it on the command line.
+export OMNIROUTE_API_KEY="<your OmniRoute API key>"
+bash ./macos/bootstrap.sh
 
 # Use a non-default port everywhere.
 bash ./macos/scripts/setup-omniroute.sh --port 20200
@@ -234,8 +255,8 @@ session; the OmniRoute routing default in `settings.json` applies on the next la
 
 ### Refreshing the model list
 
-Setup seeds bare-id aliases so Claude Code's model ids route unambiguously to Copilot. If
-GitHub Copilot adds or removes models, re-seed the catalog:
+OmniRoute 3.8.50+ manages model aliases automatically. To display the current
+authenticated catalog after GitHub Copilot adds or removes models:
 
 ```powershell
 # Windows
@@ -247,14 +268,14 @@ pwsh -File .\windows\scripts\refresh-models.ps1
 bash ./macos/scripts/refresh-models.sh
 ```
 
-This is idempotent and only touches aliases that are new or already point at a `github/*`
-model — aliases owned by other providers are left untouched.
+These commands are read-only and do not access or modify OmniRoute's SQLite database.
 
 ## Troubleshooting
 
 - **`claude` starts but no model responds / it hangs:** the OmniRoute server is probably
   down. Run the `start-omniroute` script for your OS (or `omniroute serve`) and retry. The
-  server takes ~20–30s to become healthy on a cold start.
+  server can take up to three minutes to become healthy on a cold start while it warms
+  caches and synchronizes metadata.
 - **No Copilot models:** open `http://localhost:20128/dashboard/oauth` and connect GitHub
   Copilot.
 - **Want direct Anthropic access back:** restore `settings.json.bak` over your

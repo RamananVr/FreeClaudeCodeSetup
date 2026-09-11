@@ -32,6 +32,9 @@
 .PARAMETER Port
   OmniRoute server port (default: 20128).
 
+.PARAMETER OmniRouteVersion
+  OmniRoute package version to install (default: 3.8.50).
+
 .PARAMETER NoLaunch
   Set up everything but do not launch the interactive Claude Code session at the end.
 
@@ -53,7 +56,8 @@ param(
   [string]$Model = "github/claude-opus-4.8",
   [string]$StageDir = (Join-Path $env:USERPROFILE "omniroute-stage"),
   [int]$Port = 20128,
-  [string]$X64NodeVersion = "20.18.1",
+  [string]$OmniRouteVersion = "3.8.50",
+  [string]$X64NodeVersion = "22.22.2",
   [switch]$NoLaunch,
   [switch]$AcceptRoutingChange,
   [switch]$RefreshFeedAuth
@@ -83,12 +87,42 @@ if ($node.Dir) {
   Ok "Using provisioned x64 Node: $($node.NodeExe)"
 }
 
+$nodeVersion = & $node.NodeExe -p "process.versions.node"
+$nodeMajor, $nodeMinor, $nodePatch = $nodeVersion.Split('.')[0..2] | ForEach-Object { [int]$_ }
+$nodeSupported = (
+  ($nodeMajor -eq 22 -and ($nodeMinor -gt 22 -or ($nodeMinor -eq 22 -and $nodePatch -ge 2))) -or
+  ($nodeMajor -ge 24 -and $nodeMajor -lt 27)
+)
+if (-not $nodeSupported) {
+  Die "OmniRoute $OmniRouteVersion requires Node >=22.22.2 <23 or >=24 <27; found v$nodeVersion."
+}
+
 $prefix = (npm config get prefix).Trim()
 $gRoot  = (npm root -g).Trim()
 Info "npm prefix    : $prefix"
 Info "npm global lib: $gRoot"
+Info "omniroute     : $OmniRouteVersion"
 Info "main model    : $Model"
 Info "stage dir     : $StageDir"
+
+$previousVersion = $null
+$existingOmni = Get-Command omniroute -ErrorAction SilentlyContinue
+if ($existingOmni) {
+  try { $previousVersion = (& $existingOmni.Source --version 2>$null | Select-Object -Last 1).Trim() } catch { }
+}
+
+$healthUrl = "http://localhost:$Port/api/monitoring/health"
+function Test-OmniUp { try { (Invoke-WebRequest $healthUrl -TimeoutSec 3 -UseBasicParsing).StatusCode -eq 200 } catch { $false } }
+
+# Windows keeps loaded native modules locked, so stop an older server before npm
+# replaces its staged package. A same-version idempotent run leaves it running.
+if ((Test-OmniUp) -and $previousVersion -and $previousVersion -ne $OmniRouteVersion) {
+  Info "Stopping OmniRoute before upgrade ($previousVersion -> $OmniRouteVersion)..."
+  & $existingOmni.Source stop | Out-Null
+  $deadline = (Get-Date).AddSeconds(30)
+  while ((Get-Date) -lt $deadline -and (Test-OmniUp)) { Start-Sleep -Seconds 1 }
+  if (Test-OmniUp) { Die "OmniRoute did not stop before upgrading. Run 'omniroute stop', then re-run setup." }
+}
 
 if ($RefreshFeedAuth) {
   $vsts = Join-Path $prefix "vsts-npm-auth.ps1"
@@ -99,15 +133,15 @@ if ($RefreshFeedAuth) {
 # --- 1. Staging install with yuku-ast override ------------------------------
 Info "Preparing staging install (works around missing yuku-ast@0.6.5 in the feed)..."
 New-Item -ItemType Directory -Force -Path $StageDir | Out-Null
-@'
+@"
 {
   "name": "omniroute-staging",
   "version": "1.0.0",
   "private": true,
-  "dependencies": { "omniroute": "*" },
+  "dependencies": { "omniroute": "$OmniRouteVersion" },
   "overrides": { "yuku-ast": "0.6.7" }
 }
-'@ | Set-Content -Path (Join-Path $StageDir "package.json") -Encoding ascii
+"@ | Set-Content -Path (Join-Path $StageDir "package.json") -Encoding ascii
 
 Push-Location $StageDir
 try {
@@ -158,31 +192,37 @@ Ok "Created omniroute / omniroute-reset-password shims"
 if (($env:Path -split ';') -notcontains $prefix) { $env:Path = "$prefix;$env:Path" }
 $omni = Join-Path $prefix "omniroute.cmd"
 
+# OmniRoute keeps native modules in a per-user runtime directory. Ensure the
+# version-specific better-sqlite3 binary exists before starting the server.
+Info "Checking OmniRoute native runtime..."
+& $omni runtime repair
+if ($LASTEXITCODE -ne 0) { Die "OmniRoute native runtime repair failed." }
+
 # --- 4. (removed) The former claude-omni wrapper is gone: routing now lives in
 #        Claude Code's settings.json env block (see section 6.6), so plain `claude`
 #        routes through OmniRoute -> Copilot. No separate launcher/profile.
 
 # --- 5. Start the OmniRoute server (if not already up) ----------------------
-$healthUrl = "http://localhost:$Port/api/monitoring/health"
-function Test-OmniUp { try { (Invoke-WebRequest $healthUrl -TimeoutSec 3 -UseBasicParsing).StatusCode -eq 200 } catch { $false } }
-
 if (Test-OmniUp) {
   Ok "OmniRoute server already running on port $Port"
 } else {
   Info "Starting OmniRoute server..."
-  Start-Process -FilePath $omni -ArgumentList "serve" -WindowStyle Minimized
-  $deadline = (Get-Date).AddSeconds(90)
+  Start-Process -FilePath $omni -ArgumentList @("serve", "--port", "$Port", "--no-open") -WindowStyle Minimized
+  $deadline = (Get-Date).AddSeconds(180)
   while ((Get-Date) -lt $deadline -and -not (Test-OmniUp)) { Start-Sleep -Seconds 3 }
   if (Test-OmniUp) { Ok "OmniRoute server is up on port $Port" }
-  else { Die "OmniRoute server did not become healthy within 90s. Run 'omniroute serve' manually to see errors." }
+  else { Die "OmniRoute server did not become healthy within 180s. Run 'omniroute serve' manually to see errors." }
 }
 
 # --- 6. Ensure GitHub Copilot provider is connected -------------------------
 $sentinel = @{ "Authorization" = "Bearer omniroute-no-auth"; "x-api-key" = "omniroute-no-auth" }
 function Get-CopilotModelCount {
   try {
-    $r = Invoke-WebRequest "http://localhost:$Port/v1/models" -Headers $sentinel -TimeoutSec 10 -UseBasicParsing
-    (($r.Content | ConvertFrom-Json).data.id | Where-Object { $_ -match '^(gh|github)/' }).Count
+    $raw = (& $omni --quiet --output json --base-url "http://localhost:$Port" api models get-api-models 2>$null | Out-String)
+    $jsonStart = $raw.IndexOf('{')
+    if ($jsonStart -lt 0) { return 0 }
+    $models = ($raw.Substring($jsonStart) | ConvertFrom-Json).models
+    @($models | Where-Object { $_.available -and $_.provider -match '^(gh|github)$' }).Count
   } catch { 0 }
 }
 $ghCount = Get-CopilotModelCount
@@ -198,14 +238,10 @@ if ($ghCount -gt 0) {
   else { Warn "Still no Copilot models detected - you can finish connecting later and then run: claude" }
 }
 
-# --- 6.5 Seed model aliases (dynamic discovery from /v1/models) -------------
-# Claude Code (esp. via /model or gateway discovery) can send unprefixed canonical
-# ids like "claude-opus-4-8". OmniRoute then sees that id on several providers and
-# fails with "Ambiguous model". refresh-models.ps1 discovers every connected
-# github/* Copilot model and seeds bare-id aliases for them (with a clobber guard
-# so aliases owned by other providers are left intact). Single source of truth,
-# reusable standalone to re-seed when the catalog changes.
-Info "Seeding model aliases from discovered Copilot catalog..."
+# --- 6.5 Show the model catalog ---------------------------------------------
+# OmniRoute 3.8.50+ manages aliases internally. Keep the helper as a read-only,
+# authenticated catalog view for setup output and the bundled list-models skill.
+Info "Reading the discovered Copilot catalog..."
 $refresh = Join-Path $PSScriptRoot "refresh-models.ps1"
 & $refresh -Port $Port -StageDir $StageDir
 

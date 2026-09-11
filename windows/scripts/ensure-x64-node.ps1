@@ -28,7 +28,7 @@
 #>
 [CmdletBinding()]
 param(
-  [string]$X64NodeVersion = "20.18.1",
+  [string]$X64NodeVersion = "22.22.2",
   [string]$InstallRoot = (Join-Path $env:USERPROFILE ".omniroute\node-x64")
 )
 

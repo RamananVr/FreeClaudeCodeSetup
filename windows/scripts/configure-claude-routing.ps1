@@ -21,6 +21,10 @@
   Override the target settings.json path (mainly for tests). Defaults to
   $CLAUDE_CONFIG_DIR\settings.json if set, else $HOME\.claude\settings.json.
 
+.PARAMETER ApiKey
+  OmniRoute API key for secured instances. Defaults to OMNIROUTE_API_KEY; when
+  omitted, uses the sentinel accepted by an unauthenticated local instance.
+
 .EXAMPLE
   pwsh -File .\configure-claude-routing.ps1
 
@@ -31,7 +35,8 @@
 param(
   [int]$Port = 20128,
   [string]$Model = "github/claude-opus-4.8",
-  [string]$SettingsPath
+  [string]$SettingsPath,
+  [string]$ApiKey = $env:OMNIROUTE_API_KEY
 )
 
 $ErrorActionPreference = "Stop"
@@ -74,7 +79,7 @@ if ($null -eq $settings) { $settings = [pscustomobject]@{} }
 # --- Merge the routing env block --------------------------------------------
 $routing = [ordered]@{
   ANTHROPIC_BASE_URL                        = "http://localhost:$Port"
-  ANTHROPIC_AUTH_TOKEN                      = "omniroute-no-auth"
+  ANTHROPIC_AUTH_TOKEN                      = $(if ($ApiKey) { $ApiKey } else { "omniroute-no-auth" })
   ANTHROPIC_MODEL                           = $Model
   CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY = "1"
 }

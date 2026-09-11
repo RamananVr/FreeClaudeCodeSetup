@@ -13,7 +13,7 @@
 # All human-readable logging goes to STDERR so stdout stays machine-parseable.
 #
 # Overridable via env vars:
-#   X64_NODE_VERSION  (default 20.18.1)
+#   X64_NODE_VERSION  (default 22.22.2)
 #   INSTALL_ROOT      (default $HOME/.omniroute/node-x64)
 
 set -euo pipefail
@@ -26,7 +26,7 @@ log_info() { info "$@" >&2; }
 log_ok()   { ok   "$@" >&2; }
 log_warn() { warn "$@" >&2; }
 
-X64_NODE_VERSION="${X64_NODE_VERSION:-20.18.1}"
+X64_NODE_VERSION="${X64_NODE_VERSION:-22.22.2}"
 INSTALL_ROOT="${INSTALL_ROOT:-$HOME/.omniroute/node-x64}"
 
 # Emit the two-line output contract on stdout, then exit 0.

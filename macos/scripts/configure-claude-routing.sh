@@ -88,7 +88,8 @@ if [ "$has_content" -eq 1 ]; then
 fi
 
 # --- 3. Merge routing env block and write ----------------------------------------
-if ! SETTINGS_PATH="$SETTINGS_PATH" PORT="$PORT" MODEL="$MODEL" HAS_CONTENT="$has_content" node -e '
+if ! SETTINGS_PATH="$SETTINGS_PATH" PORT="$PORT" MODEL="$MODEL" HAS_CONTENT="$has_content" \
+     ROUTING_API_KEY="${OMNIROUTE_API_KEY:-omniroute-no-auth}" node -e '
   const fs = require("fs");
   const p = process.env.SETTINGS_PATH;
 
@@ -109,7 +110,7 @@ if ! SETTINGS_PATH="$SETTINGS_PATH" PORT="$PORT" MODEL="$MODEL" HAS_CONTENT="$ha
 
   // Apply routing keys, preserving all other env and top-level keys.
   env.ANTHROPIC_BASE_URL = `http://localhost:${process.env.PORT}`;
-  env.ANTHROPIC_AUTH_TOKEN = "omniroute-no-auth";
+  env.ANTHROPIC_AUTH_TOKEN = process.env.ROUTING_API_KEY;
   env.ANTHROPIC_MODEL = process.env.MODEL;
   env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY = "1";
 

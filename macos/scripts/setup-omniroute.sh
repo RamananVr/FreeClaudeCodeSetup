@@ -16,8 +16,8 @@
 #      and run node/omniroute under `arch -x86_64`.
 #   2. Install: plain `npm install -g omniroute` (no Windows-style staging).
 #   3. Start the OmniRoute server (start-omniroute.sh).
-#   4. Ensure GitHub Copilot is connected (poll /v1/models; open dashboard).
-#   5. Seed model aliases (refresh-models.sh).
+#   4. Ensure GitHub Copilot is connected (authenticated CLI catalog; open dashboard).
+#   5. Show the discovered model catalog (refresh-models.sh).
 #   6. Route the default `claude` (configure-claude-routing.sh), with disclaimer.
 #   7. Summary + launch `claude` unless --no-launch.
 #
@@ -25,6 +25,7 @@
 #
 # Usage:
 #   setup-omniroute.sh [--model <str>] [--stage-dir <path>] [--port <n>]
+#                      [--omniroute-version <str>]
 #                      [--x64-node-version <str>] [--no-launch]
 #                      [--accept-routing-change]
 
@@ -37,7 +38,8 @@ source "$SCRIPT_DIR/_common.sh"
 MODEL="github/claude-opus-4.8"
 STAGE_DIR="$HOME/omniroute-stage"
 PORT=20128
-X64_NODE_VERSION="20.18.1"
+OMNIROUTE_VERSION="3.8.50"
+X64_NODE_VERSION="22.22.2"
 NO_LAUNCH=0
 ACCEPT_ROUTING_CHANGE=0
 
@@ -47,6 +49,7 @@ while [ $# -gt 0 ]; do
     --model)                [ $# -ge 2 ] || die "--model requires a value.";             MODEL="$2"; shift 2 ;;
     --stage-dir)            [ $# -ge 2 ] || die "--stage-dir requires a value.";          STAGE_DIR="$2"; shift 2 ;;
     --port)                 [ $# -ge 2 ] || die "--port requires a value.";               PORT="$2"; shift 2 ;;
+    --omniroute-version)    [ $# -ge 2 ] || die "--omniroute-version requires a value.";  OMNIROUTE_VERSION="$2"; shift 2 ;;
     --x64-node-version)     [ $# -ge 2 ] || die "--x64-node-version requires a value.";   X64_NODE_VERSION="$2"; shift 2 ;;
     --no-launch)            NO_LAUNCH=1; shift ;;
     --accept-routing-change) ACCEPT_ROUTING_CHANGE=1; shift ;;
@@ -97,9 +100,41 @@ else
   NODE_PREFIX=()
 fi
 
+node_version="$("${NODE_PREFIX[@]+"${NODE_PREFIX[@]}"}" node -p process.versions.node)"
+node_major="${node_version%%.*}"
+node_rest="${node_version#*.}"
+node_minor="${node_rest%%.*}"
+node_patch="${node_rest#*.}"
+node_patch="${node_patch%%.*}"
+if ! { [ "$node_major" -eq 22 ] &&
+       { [ "$node_minor" -gt 22 ] || { [ "$node_minor" -eq 22 ] && [ "$node_patch" -ge 2 ]; }; }; } &&
+   ! { [ "$node_major" -ge 24 ] && [ "$node_major" -lt 27 ]; }; then
+  die "OmniRoute $OMNIROUTE_VERSION requires Node >=22.22.2 <23 or >=24 <27; found v$node_version."
+fi
+
 info "main model : $MODEL"
 info "stage dir  : $STAGE_DIR"
 info "port       : $PORT"
+info "omniroute  : $OMNIROUTE_VERSION"
+
+previous_version=""
+if command -v omniroute >/dev/null 2>&1; then
+  previous_version="$(omniroute --version 2>/dev/null | tail -1 || true)"
+fi
+
+if [ -n "$previous_version" ] && [ "$previous_version" != "$OMNIROUTE_VERSION" ] &&
+   curl -fsS -m 3 "http://localhost:$PORT/api/monitoring/health" >/dev/null 2>&1; then
+  info "Stopping OmniRoute before upgrade ($previous_version -> $OMNIROUTE_VERSION)..."
+  "${NODE_PREFIX[@]+"${NODE_PREFIX[@]}"}" omniroute stop >/dev/null
+  deadline=$((SECONDS + 30))
+  while [ "$SECONDS" -lt "$deadline" ] &&
+        curl -fsS -m 3 "http://localhost:$PORT/api/monitoring/health" >/dev/null 2>&1; do
+    sleep 1
+  done
+  if curl -fsS -m 3 "http://localhost:$PORT/api/monitoring/health" >/dev/null 2>&1; then
+    die "OmniRoute did not stop before upgrading. Run 'omniroute stop', then re-run setup."
+  fi
+fi
 
 # --- 2. Install omniroute globally -----------------------------------------------
 # macOS uses a plain global install (no Windows-style staging/junction). On arm64
@@ -108,9 +143,9 @@ info "port       : $PORT"
 # can shell out to node-gyp/prebuild-install children that key off `uname -m`; an
 # un-wrapped arm64 child could otherwise pull/build an arm64 native artifact, the
 # exact thing OmniRoute's native deps lack. On x64 NODE_PREFIX is empty (no-op).
-info "Installing omniroute globally (npm install -g omniroute)..."
-if ! "${NODE_PREFIX[@]+"${NODE_PREFIX[@]}"}" npm install -g omniroute --no-fund --no-audit; then
-  die "npm install -g omniroute failed. Check your network/npm registry, then re-run."
+info "Installing omniroute@$OMNIROUTE_VERSION globally..."
+if ! "${NODE_PREFIX[@]+"${NODE_PREFIX[@]}"}" npm install -g "omniroute@$OMNIROUTE_VERSION" --no-fund --no-audit; then
+  die "npm install -g omniroute@$OMNIROUTE_VERSION failed. Check your network/npm registry, then re-run."
 fi
 
 # Verify the omniroute launcher resolves (on PATH, or under the npm global root).
@@ -125,6 +160,13 @@ else
   fi
 fi
 
+# OmniRoute keeps native modules in a per-user runtime directory. Ensure the
+# version-specific better-sqlite3 binary exists before starting the server.
+info "Checking OmniRoute native runtime..."
+if ! "${NODE_PREFIX[@]+"${NODE_PREFIX[@]}"}" omniroute runtime repair; then
+  die "OmniRoute native runtime repair failed."
+fi
+
 # --- 3. Start the OmniRoute server -----------------------------------------------
 info "Starting the OmniRoute server..."
 if ! bash "$START_OMNIROUTE" --port "$PORT"; then
@@ -132,11 +174,8 @@ if ! bash "$START_OMNIROUTE" --port "$PORT"; then
 fi
 
 # --- 4. Ensure GitHub Copilot is connected ---------------------------------------
-# Count the github/* model ids reported by /v1/models. Sentinel headers let the
-# local proxy accept the request without real auth. We pipe the JSON body to node
-# (already a dependency) to count ids matching ^(gh|github)/. Never aborts under
-# set -e: every failure path yields "0".
-copilot_model_count() {
+# Legacy unauthenticated probe retained for pre-3.8.50 compatibility.
+legacy_copilot_model_count() {
   local body
   body="$(curl -fsS -m 10 \
     -H "Authorization: Bearer omniroute-no-auth" \
@@ -166,6 +205,31 @@ copilot_model_count() {
   esac
 }
 
+# OmniRoute 3.8.50+ protects /v1/models. Override the legacy probe with the
+# authenticated management command, which uses the local CLI machine credential.
+copilot_model_count() {
+  local body
+  body="$(omniroute --quiet --output json --base-url "http://localhost:$PORT" \
+    api models get-api-models 2>/dev/null || true)"
+  body="$(printf '%s\n' "$body" | sed -n '/^{/,$p')"
+  [ -n "$body" ] || { echo 0; return 0; }
+  printf '%s' "$body" | "${NODE_PREFIX[@]+"${NODE_PREFIX[@]}"}" node -e '
+    let raw = "";
+    process.stdin.on("data", chunk => raw += chunk);
+    process.stdin.on("end", () => {
+      try {
+        const body = JSON.parse(raw);
+        const models = Array.isArray(body.models) ? body.models : [];
+        process.stdout.write(String(models.filter(
+          model => model && model.available && /^(gh|github)$/.test(model.provider)
+        ).length));
+      } catch (_) {
+        process.stdout.write("0");
+      }
+    });
+  '
+}
+
 gh_count="$(copilot_model_count)"
 if [ "$gh_count" -gt 0 ]; then
   ok "GitHub Copilot connected ($gh_count Copilot models available)."
@@ -188,10 +252,9 @@ else
   fi
 fi
 
-# --- 5. Seed model aliases -------------------------------------------------------
-# Discovers every connected github/* Copilot model and seeds bare-id aliases so
-# unprefixed ids route unambiguously. Never hard-fails.
-info "Seeding model aliases from the discovered Copilot catalog..."
+# --- 5. Show the model catalog ---------------------------------------------------
+# OmniRoute 3.8.50+ manages aliases internally; this helper is now read-only.
+info "Reading the discovered Copilot catalog..."
 bash "$REFRESH_MODELS" --port "$PORT" --stage-dir "$STAGE_DIR" || true
 
 # --- 6. Route the DEFAULT `claude` through OmniRoute -----------------------------

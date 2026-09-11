@@ -15,9 +15,12 @@
 .PARAMETER Port
   OmniRoute server port, applied to both setup and autostart (default: 20128).
 
+.PARAMETER OmniRouteVersion
+  OmniRoute package version to install (default: 3.8.50).
+
 .PARAMETER X64NodeVersion
   On ARM64 hosts, the pinned x64 Node version auto-provisioned for OmniRoute
-  (default: 20.18.1). Ignored on x64 hosts.
+  (default: 22.22.2). Ignored on x64 hosts.
 
 .PARAMETER NoAutostart
   Run setup only; skip registering the logon task.
@@ -41,7 +44,8 @@
 param(
   [string]$Model = "github/claude-opus-4.8",
   [int]$Port = 20128,
-  [string]$X64NodeVersion = "20.18.1",
+  [string]$OmniRouteVersion = "3.8.50",
+  [string]$X64NodeVersion = "22.22.2",
   [switch]$NoAutostart,
   [switch]$NoLaunch,
   [switch]$AcceptRoutingChange,
@@ -60,7 +64,12 @@ foreach ($s in @($setup, $autostart)) {
 Write-Host "`n=== OmniRoute bootstrap ===`n" -ForegroundColor White
 
 # --- 1. Setup ---------------------------------------------------------------
-$setupArgs = @{ Model = $Model; Port = $Port; X64NodeVersion = $X64NodeVersion }
+$setupArgs = @{
+  Model = $Model
+  Port = $Port
+  OmniRouteVersion = $OmniRouteVersion
+  X64NodeVersion = $X64NodeVersion
+}
 if ($NoLaunch)            { $setupArgs.NoLaunch = $true }
 if ($AcceptRoutingChange) { $setupArgs.AcceptRoutingChange = $true }
 if ($RefreshFeedAuth)     { $setupArgs.RefreshFeedAuth = $true }

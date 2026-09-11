@@ -6,8 +6,8 @@ description: List all GitHub Copilot models currently connected to OmniRoute. Us
 # List Available Copilot Models
 
 Prints every GitHub Copilot model currently connected to the local OmniRoute
-server, discovered live from its `/v1/models` endpoint. Read-only — it does not
-change routing or seed aliases.
+server through its authenticated management API. Read-only — it does not change
+routing or seed aliases.
 
 ## When to use
 
